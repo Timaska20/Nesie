@@ -1,33 +1,38 @@
-# Первый этап: Сборка зависимостей
-FROM python:3.9-slim AS builder
+FROM python:3.9-slim
 
 WORKDIR /app
 
-# Установка необходимых библиотек и зависимостей
+# Устанавливаем все необходимые зависимости и добавляем инструменты для работы с репозиториями
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopenblas-dev liblapack-dev \
+    apt-utils \
+    software-properties-common \
+    build-essential \
+    gcc \
+    g++ \
+    libffi-dev \
+    libgomp1 \
+    libc-dev \
+    libpq-dev \
+    libssl-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    libjpeg-dev \
+    libpng-dev \
+    ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка Python-зависимостей
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
+
+RUN pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Второй этап: Минимизированный финальный контейнер
-FROM python:3.9-alpine
+COPY . .
 
-WORKDIR /app
+# Удаление ненужных пакетов для уменьшения размера образа
+RUN apt-get purge -y --auto-remove build-essential gcc g++ libc-dev
 
-# Копируем только необходимые файлы из builder-образа
-COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+EXPOSE 8000
 
-# Копирование основного кода приложения
-COPY main.py .
-COPY my_pipeline.pkl .
-
-# Открытие порта для Flask
-EXPOSE 5000
-
-# Команда для запуска приложения
-CMD ["python", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
