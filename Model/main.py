@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pycaret.classification import load_model, predict_model
 import pandas as pd
@@ -7,6 +8,14 @@ import catboost
 import numpy as np
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # разрешаем все домены, либо укажите конкретные адреса
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Загрузка модели
 pipeline = load_model('my_pipeline')

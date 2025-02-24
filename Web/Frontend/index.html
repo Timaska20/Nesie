@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Фронтенд для Credit Prediction</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <h2>Предсказание кредита</h2>
+  <form id="predictionForm">
+    <label for="person_age">Возраст:</label>
+    <input type="number" id="person_age" name="person_age" required>
+
+    <label for="person_income">Доход:</label>
+    <input type="number" id="person_income" name="person_income" step="0.01" required>
+
+    <label for="person_home_ownership">Владение жильём:</label>
+    <select id="person_home_ownership" name="person_home_ownership" required>
+      <option value="RENT">Аренда</option>
+      <option value="OWN">Собственность</option>
+      <option value="MORTGAGE">Ипотека</option>
+      <option value="OTHER">Другое</option>
+    </select>
+
+    <label for="person_emp_length">Стаж работы (лет):</label>
+    <input type="number" id="person_emp_length" name="person_emp_length" step="0.1">
+
+    <label for="loan_intent">Цель кредита:</label>
+    <select id="loan_intent" name="loan_intent" required>
+      <option value="PERSONAL">Личные нужды</option>
+      <option value="EDUCATION">Образование</option>
+      <option value="MEDICAL">Медицинский</option>
+      <option value="VENTURE">Предпринимательство</option>
+      <option value="HOMEIMPROVEMENT">Ремонт жилья</option>
+      <option value="DEBTCONSOLIDATION">Консолидация долгов</option>
+    </select>
+
+    <label for="loan_grade">Класс кредита:</label>
+    <select id="loan_grade" name="loan_grade" required>
+      <option value="A">Класс A</option>
+      <option value="B">Класс B</option>
+      <option value="C">Класс C</option>
+      <option value="D">Класс D</option>
+      <option value="E">Класс E</option>
+      <option value="F">Класс F</option>
+      <option value="G">Класс G</option>
+    </select>
+
+    <label for="loan_amnt">Сумма кредита:</label>
+    <input type="number" id="loan_amnt" name="loan_amnt" step="0.01" required>
+
+    <label for="loan_int_rate">Процентная ставка (%):</label>
+    <input type="number" id="loan_int_rate" name="loan_int_rate" step="0.01">
+
+    <!-- Поле "Доля кредита от дохода" рассчитывается автоматически -->
+
+    <label for="cb_person_default_on_file">Наличие дефолта:</label>
+    <select id="cb_person_default_on_file" name="cb_person_default_on_file" required>
+      <option value="N">Нет</option>
+      <option value="Y">Да</option>
+    </select>
+
+    <label for="cb_person_cred_hist_length">Длина кредитной истории (лет):</label>
+    <input type="number" id="cb_person_cred_hist_length" name="cb_person_cred_hist_length" required>
+
+    <button type="submit">Предсказать</button>
+  </form>
+
+  <div id="result"></div>
+  <script src="js/script.js"></script>
+</body>
+</html>
