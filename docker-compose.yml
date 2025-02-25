@@ -1,23 +1,4 @@
-version: '3.8'
-
 services:
-  frontend:
-    build: ./Web
-    ports:
-      - "80:80"
-    depends_on:
-      - model
-    networks:
-      - app-network
-
-  model:
-    build: ./Model
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-    networks:
-      - app-network
 
   db:
     image: postgres:latest
@@ -32,6 +13,25 @@ services:
       - db_data:/var/lib/postgresql/data
     networks:
       - app-network
+
+  model:
+    build: ./Model
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  frontend:
+    build: ./Web
+    ports:
+      - "80:80"
+    depends_on:
+      - model
+    networks:
+      - app-network
+
 
 volumes:
   db_data:
