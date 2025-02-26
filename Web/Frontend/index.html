@@ -2,8 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Credit Prediction</title>
-  <link rel="stylesheet" href="/css/style.css"> <!-- Абсолютный путь -->
+  <title>Система кредитного скоринга</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <h1>Система предсказания кредитов</h1>
@@ -39,15 +39,18 @@
     </form>
   </section>
 
-  <!-- Предсказание -->
-  <section id="predictionSection" style="display:none;">
-    <h2>Предсказание кредита</h2>
-    <form id="predictionForm">
+  <!-- Панель администратора -->
+  <section id="adminPanel" style="display:none;">
+    <h2>Панель администратора</h2>
+    <form id="addCreditHistoryForm">
+      <label for="credit_user_id">Имя пользователя:</label>
+      <input type="text" id="credit_user_id" required>
+
       <label for="person_age">Возраст:</label>
       <input type="number" id="person_age" required>
 
       <label for="person_income">Доход:</label>
-      <input type="number" id="person_income" step="0.01" required>
+      <input type="number" id="person_income" required>
 
       <label for="person_home_ownership">Владение жильем:</label>
       <select id="person_home_ownership" required>
@@ -58,14 +61,14 @@
       </select>
 
       <label for="person_emp_length">Стаж работы (лет):</label>
-      <input type="number" id="person_emp_length" step="0.1">
+      <input type="number" id="person_emp_length" required>
 
       <label for="loan_intent">Цель кредита:</label>
       <select id="loan_intent" required>
         <option value="PERSONAL">Личные нужды</option>
         <option value="EDUCATION">Образование</option>
         <option value="MEDICAL">Медицинские</option>
-        <option value="VENTURE">Предпринимательство</option>
+        <option value="VENTURE">Бизнес</option>
         <option value="HOMEIMPROVEMENT">Ремонт жилья</option>
         <option value="DEBTCONSOLIDATION">Консолидация долгов</option>
       </select>
@@ -85,7 +88,10 @@
       <input type="number" id="loan_amnt" step="0.01" required>
 
       <label for="loan_int_rate">Процентная ставка (%):</label>
-      <input type="number" id="loan_int_rate" step="0.01">
+      <input type="number" id="loan_int_rate" step="0.01" required>
+
+      <label for="loan_percent_income">Процент дохода на кредит:</label>
+      <input type="number" id="loan_percent_income" step="0.01" required>
 
       <label for="cb_person_default_on_file">Наличие дефолта:</label>
       <select id="cb_person_default_on_file" required>
@@ -96,12 +102,17 @@
       <label for="cb_person_cred_hist_length">Длина кредитной истории (лет):</label>
       <input type="number" id="cb_person_cred_hist_length" required>
 
-      <button type="submit">Предсказать</button>
+      <button type="submit">Добавить кредитную историю</button>
     </form>
-
-    <div id="result"></div>
   </section>
 
-  <script src="/js/script.js"></script> <!-- Абсолютный путь -->
+  <!-- Панель пользователя -->
+  <section id="userPanel" style="display:none;">
+    <h2>Получить кредит</h2>
+    <button id="getCreditButton">Получить кредит</button>
+    <div id="creditResult"></div>
+  </section>
+
+  <script src="/js/script.js"></script>
 </body>
 </html>

@@ -1,85 +1,61 @@
-let accessToken = "";
+// Функция для регистрации пользователя
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-// Регистрация
-document.getElementById("registerForm").addEventListener("submit", async (e) => {
-  e.preventDefault(); // Предотвращаем перезагрузку страницы
+    const username = document.getElementById('register_username').value;
+    const password = document.getElementById('register_password').value;
 
-  const data = {
-    username: document.getElementById("register_username").value,
-    full_name: document.getElementById("register_fullname").value,
-    password: document.getElementById("register_password").value,
-  };
+    try {
+        const response = await fetch('/api/register/', {  // Обязательно с `/` в конце!
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
 
-  try {
-    const response = await fetch("http://localhost:8000/register/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Ошибка регистрации');
+        }
 
-    if (response.ok) {
-      alert("Регистрация прошла успешно. Теперь войдите в систему.");
-    } else {
-      const result = await response.json();
-      alert("Ошибка регистрации: " + result.detail);
+        const data = await response.json();
+        alert(`Пользователь ${data.username} успешно зарегистрирован!`);
+    } catch (error) {
+        alert(`Ошибка регистрации: ${error.message}`);
     }
-  } catch (error) {
-    console.error("Ошибка регистрации:", error);
-  }
 });
 
-// Вход
-document.getElementById("loginForm").addEventListener("submit", async (e) => {
-  e.preventDefault(); // Предотвращаем перезагрузку страницы
+// Функция для входа пользователя
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-  const formData = new URLSearchParams();
-  formData.append("username", document.getElementById("login_username").value);
-  formData.append("password", document.getElementById("login_password").value);
+    const username = document.getElementById('login_username').value;
+    const password = document.getElementById('login_password').value;
 
-  try {
-    const response = await fetch("http://localhost:8000/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString(),
-    });
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
 
-    if (response.ok) {
-      const result = await response.json();
-      accessToken = result.access_token;
-      alert("Вход выполнен успешно!");
-      document.getElementById("predictionSection").style.display = "block";
-    } else {
-      alert("Ошибка входа: Неверное имя пользователя или пароль.");
+    try {
+        const response = await fetch('/api/token/', {  // Обязательно с `/` в конце!
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Ошибка входа: ${errorText}`);
+        }
+
+        const data = await response.json();
+        alert(`Успешный вход. Токен: ${data.access_token}`);
+
+        localStorage.setItem('access_token', data.access_token);
+
+        // Показываем панели пользователя и администратора
+        document.getElementById('userPanel').style.display = 'block';
+        document.getElementById('adminPanel').style.display = 'block';
+    } catch (error) {
+        alert(error.message);
     }
-  } catch (error) {
-    console.error("Ошибка входа:", error);
-  }
-});
-
-// Предсказание
-document.getElementById("predictionForm").addEventListener("submit", async (e) => {
-  e.preventDefault(); // Предотвращаем перезагрузку страницы
-
-  const formData = new FormData(e.target);
-  const data = Object.fromEntries(formData.entries());
-
-  try {
-    const response = await fetch("http://localhost:8000/predict/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify([data]),
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      document.getElementById("result").innerText = JSON.stringify(result.predictions, null, 2);
-    } else {
-      alert("Ошибка при выполнении предсказания");
-    }
-  } catch (error) {
-    console.error("Ошибка предсказания:", error);
-  }
 });
