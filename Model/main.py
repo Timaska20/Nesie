@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from datetime import datetime, timedelta
 
 from models import SessionLocal, User, Credit
 
@@ -50,10 +51,20 @@ class Token(BaseModel):
 
 
 class CreditCreate(BaseModel):
+    user_id: int
     loan_amount: float
     interest_rate: float
     term_months: int
     status: str
+    person_age: int
+    person_income: float
+    person_home_ownership: str
+    person_emp_length: int
+    loan_intent: str
+    loan_grade: str
+    loan_percent_income: float
+    cb_person_default_on_file: bool
+    cb_person_cred_hist_length: int
 
 
 # Утилиты для работы с пользователями
@@ -69,8 +80,15 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict):
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 # Эндпоинты
@@ -92,51 +110,49 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     user = get_user_by_username(db, form_data.username)
     if not user or not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=400, detail="Неверное имя пользователя или пароль")
-
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user.username, "is_admin": user.is_admin})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@app.post("/credits/")
-def create_credit(credit: CreditCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        user = get_user_by_username(db, username)
-        if user is None:
-            raise HTTPException(status_code=401, detail="Пользователь не найден")
+@app.get("/userinfo/")
+def get_user_info(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
 
-        new_credit = Credit(
-            user_id=user.id,
-            loan_amount=credit.loan_amount,
-            interest_rate=credit.interest_rate,
-            term_months=credit.term_months,
-            status=credit.status
-        )
-        db.add(new_credit)
-        db.commit()
-        db.refresh(new_credit)
-        return new_credit
-    except JWTError:
-        raise HTTPException(status_code=403, detail="Недействительный токен")
+    if not user:
+        raise HTTPException(status_code=401, detail="Неавторизованный доступ")
+
+    return {"username": user.username, "is_admin": user.is_admin}
 
 
-@app.get("/credits/")
-def read_credits(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        user = get_user_by_username(db, username)
-        if user is None:
-            raise HTTPException(status_code=401, detail="Пользователь не найден")
+@app.post("/admin/credits/")
+def add_credit_history(credit_data: CreditCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+    if user is None or user.username != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    new_credit = Credit(**credit_data.dict())
+    db.add(new_credit)
+    db.commit()
+    db.refresh(new_credit)
+    return new_credit
 
-        credits = db.query(Credit).filter(Credit.user_id == user.id).all()
-        return credits
-    except JWTError:
-        raise HTTPException(status_code=403, detail="Недействительный токен")
+
+@app.get("/admin/credits/")
+def get_all_credits(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    is_admin = payload.get("is_admin", False)  # Получаем флаг админа
+    user = get_user_by_username(db, username)
+    if user is None or not is_admin:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    return db.query(Credit).all()
 
 
 # Запуск сервера
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

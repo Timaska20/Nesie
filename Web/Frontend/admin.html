@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Админ Панель</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <h1>Админ Панель</h1>
+
+  <section id="adminPanel">
+    <h2>Управление кредитными данными</h2>
+    <form id="addCreditHistoryForm">
+      <label for="credit_user_id">ID пользователя:</label>
+      <input type="number" id="credit_user_id" required>
+
+      <label for="loan_amnt">Сумма кредита:</label>
+      <input type="number" id="loan_amnt" step="0.01" required>
+
+      <label for="loan_int_rate">Процентная ставка (%):</label>
+      <input type="number" id="loan_int_rate" step="0.01" required>
+
+      <button type="submit">Добавить кредитную историю</button>
+    </form>
+  </section>
+
+  <script src="/js/script.js"></script>
+</body>
+</html>

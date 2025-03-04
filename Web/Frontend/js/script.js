@@ -1,123 +1,106 @@
 document.addEventListener("DOMContentLoaded", function () {
     const loginForm = document.getElementById("loginForm");
     const registerForm = document.getElementById("registerForm");
-    const adminPanel = document.getElementById("adminPanel");
     const userPanel = document.getElementById("userPanel");
-    const loginSection = document.getElementById("login");
-    const registerSection = document.getElementById("registration");
+    const adminPanel = document.getElementById("adminPanel");
+    const usernameDisplay = document.getElementById("usernameDisplay");
+    const logoutButton = document.getElementById("logoutButton");
 
-    // Элемент для отображения ошибок
-    function showError(message) {
-        let errorDiv = document.getElementById("errorMessage");
-        if (!errorDiv) {
-            errorDiv = document.createElement("div");
-            errorDiv.id = "errorMessage";
-            errorDiv.style.color = "red";
-            errorDiv.style.marginTop = "10px";
-            registerForm.appendChild(errorDiv);
+    function saveToken(token) {
+        localStorage.setItem("access_token", token);
+    }
+
+    function getToken() {
+        return localStorage.getItem("access_token");
+    }
+
+    async function getUserRole() {
+        const token = getToken();
+        if (!token) return null;
+
+        try {
+            const response = await fetch("/api/userinfo/", {
+                method: "GET",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+
+            if (!response.ok) throw new Error("Ошибка авторизации");
+
+            return await response.json();
+        } catch (error) {
+            console.error("Ошибка получения информации о пользователе:", error);
+            return null;
         }
-        errorDiv.innerText = message;
-    }
-
-    // Проверяем, есть ли сохраненный токен
-    const token = localStorage.getItem("authToken");
-    const username = localStorage.getItem("username");
-
-    if (token && username) {
-        showUserInterface(username);
-    }
-
-    function showUserInterface(username) {
-        loginSection.style.display = "none";
-        registerSection.style.display = "none";
-
-        if (username === "admin") {
-            adminPanel.style.display = "block";
-        } else {
-            userPanel.style.display = "block";
-        }
-
-        addLogoutButton();
-    }
-
-    async function loginUser(username, password) {
-        const formData = new URLSearchParams();
-        formData.append("username", username);
-        formData.append("password", password);
-
-        const response = await fetch("/api/token/", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formData,
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            localStorage.setItem("authToken", data.access_token);
-            localStorage.setItem("username", username);
-
-            showUserInterface(username);
-        } else {
-            alert("Ошибка входа. Проверьте логин и пароль.");
-        }
-    }
-
-    async function registerUser(username, password) {
-        const response = await fetch("/api/register/", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ username, password }),
-        });
-
-        const data = await response.json();
-        if (response.ok) {
-            alert("Регистрация успешна! Теперь войдите в систему.");
-        } else {
-            showError(data.detail || "Ошибка регистрации.");
-        }
-    }
-
-    function logout() {
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("username");
-        location.reload();
-    }
-
-    function addLogoutButton() {
-        if (!document.getElementById("logoutButton")) {
-            const logoutButton = document.createElement("button");
-            logoutButton.id = "logoutButton";
-            logoutButton.innerText = "Выйти";
-            logoutButton.style.marginTop = "20px";
-            logoutButton.addEventListener("click", logout);
-
-            if (adminPanel.style.display === "block") {
-                adminPanel.appendChild(logoutButton);
-            } else if (userPanel.style.display === "block") {
-                userPanel.appendChild(logoutButton);
-            }
-        }
-    }
-
-    if (loginForm) {
-        loginForm.addEventListener("submit", function (event) {
-            event.preventDefault();
-            const username = document.getElementById("login_username").value;
-            const password = document.getElementById("login_password").value;
-            loginUser(username, password);
-        });
     }
 
     if (registerForm) {
-        registerForm.addEventListener("submit", function (event) {
+        registerForm.addEventListener("submit", async function (event) {
             event.preventDefault();
             const username = document.getElementById("register_username").value;
             const password = document.getElementById("register_password").value;
-            registerUser(username, password);
+
+            const response = await fetch("/api/register/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.ok) {
+                alert("Регистрация успешна! Войдите в систему.");
+            } else {
+                alert("Ошибка регистрации.");
+            }
         });
     }
+
+    if (loginForm) {
+        loginForm.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            const username = document.getElementById("login_username").value;
+            const password = document.getElementById("login_password").value;
+
+            const formData = new URLSearchParams();
+            formData.append("username", username);
+            formData.append("password", password);
+
+            const response = await fetch("/api/token/", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: formData
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                saveToken(data.access_token);
+
+                const user = await getUserRole();
+                if (user) {
+                    window.location.href = user.is_admin ? "admin.html" : "user.html";
+                }
+            } else {
+                alert("Ошибка входа. Проверьте логин и пароль.");
+            }
+        });
+    }
+
+    async function displayUserPanel() {
+        const token = getToken();
+        if (!token) return;
+
+        const user = await getUserRole();
+        if (!user) return;
+
+        usernameDisplay.textContent = user.username;
+        if (userPanel) userPanel.style.display = "block";
+        if (user.is_admin && adminPanel) adminPanel.style.display = "block";
+    }
+
+    if (logoutButton) {
+        logoutButton.addEventListener("click", function () {
+            localStorage.removeItem("access_token");
+            window.location.href = "index.html";
+        });
+    }
+
+    displayUserPanel();
 });
