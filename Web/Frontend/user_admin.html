@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление пользователем</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <h1>Управление пользователем</h1>
+
+    <section id="userDetails">
+        <h2>Информация о пользователе</h2>
+        <p><strong>ID:</strong> <span id="userId"></span></p>
+        <p><strong>Имя пользователя:</strong> <span id="username"></span></p>
+        <p><strong>Роль:</strong> <span id="userRole"></span></p>
+
+        <button id="makeAdminButton">Назначить админом</button>
+        <button id="deleteUserButton" class="danger">Удалить пользователя</button>
+        <br><br>
+        <a href="/admin.html">← Назад в панель админа</a>
+    </section>
+
+    <script src="/js/user_admin.js"></script>
+</body>
+</html>

@@ -139,6 +139,61 @@ def add_credit_history(credit_data: CreditCreate, db: Session = Depends(get_db),
     db.refresh(new_credit)
     return new_credit
 
+@app.get("/admin/users/")
+def get_all_users(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    users = db.query(User).all()
+    return [{"id": u.id, "username": u.username, "is_admin": u.is_admin} for u in users]
+
+
+@app.delete("/admin/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    user_to_delete = db.query(User).filter(User.id == user_id).first()
+
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    db.delete(user_to_delete)
+    db.commit()
+
+    return {"message": "Пользователь удалён"}
+
+
+@app.put("/admin/users/{user_id}/make_admin")
+def make_user_admin(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    user_to_promote = db.query(User).filter(User.id == user_id).first()
+
+    if not user_to_promote:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    if user_to_promote.is_admin:
+        raise HTTPException(status_code=400, detail="Пользователь уже является администратором")
+
+    user_to_promote.is_admin = True
+    db.commit()
+
+    return {"message": "Пользователь теперь администратор"}
+
 
 @app.get("/admin/credits/")
 def get_all_credits(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
