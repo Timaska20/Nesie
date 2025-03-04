@@ -137,7 +137,7 @@ def add_credit_history(credit_data: CreditCreate, db: Session = Depends(get_db),
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     username = payload.get("sub")
     user = get_user_by_username(db, username)
-    if user is None or user.username != "admin":
+    if not user or not user.is_admin:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     new_credit = Credit(**credit_data.dict())
     db.add(new_credit)
