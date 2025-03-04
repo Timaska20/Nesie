@@ -1,38 +1,29 @@
-FROM python:3.9-slim
+# Используем официальный образ Python
+FROM python:3.10-slim
 
-WORKDIR /app
-
-# Устанавливаем все необходимые зависимости и добавляем инструменты для работы с репозиториями
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    apt-utils \
-    software-properties-common \
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \
     build-essential \
-    gcc \
-    g++ \
-    libffi-dev \
-    libgomp1 \
-    libc-dev \
     libpq-dev \
-    libssl-dev \
-    libxml2-dev \
-    libxslt1-dev \
-    zlib1g-dev \
-    libjpeg-dev \
-    libpng-dev \
-    ca-certificates \
-    curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Устанавливаем рабочую директорию
+WORKDIR /app
 
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Устанавливаем wait-for-it для ожидания старта базы данных
+RUN wget https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh \
+    && chmod +x wait-for-it.sh
 
+# Копируем файлы проекта
 COPY . .
 
-# Удаление ненужных пакетов для уменьшения размера образа
-RUN apt-get purge -y --auto-remove build-essential gcc g++ libc-dev
+# Устанавливаем зависимости Python
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
+# Открываем порт для FastAPI
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Запуск скрипта инициализации и сервера FastAPI
+CMD ["bash", "-c", "./wait-for-it.sh db:5432 -- python db_init.py && uvicorn main:app --host 0.0.0.0 --port 8000"]

@@ -1,16 +1,24 @@
+/* Основной стиль страницы */
 body {
   font-family: Arial, sans-serif;
   margin: 0 auto;
-  max-width: 600px;
+  max-width: 900px;
   padding: 20px;
+  background-color: #f4f4f4;
 }
 
-h2 {
+h1, h2 {
   text-align: center;
+  color: #333;
 }
 
+/* Оформление форм */
 form {
   margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  border-radius: 8px;
 }
 
 label {
@@ -21,20 +29,91 @@ label {
 
 input, select {
   width: 100%;
-  padding: 8px;
+  padding: 10px;
   margin-top: 5px;
   box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
 }
 
 button {
   margin-top: 20px;
-  padding: 10px 20px;
+  padding: 10px;
   width: 100%;
+  background-color: #007BFF;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
-#result {
+button:hover {
+  background-color: #0056b3;
+}
+
+/* Результаты предсказания и ошибки */
+#creditResult, #result {
   margin-top: 20px;
-  padding: 10px;
-  border: 1px solid #ccc;
-  background: #f9f9f9;
+  padding: 15px;
+  border-radius: 4px;
+  background-color: #e9f7ef;
+  border: 1px solid #28a745;
+  color: #155724;
+}
+
+#error {
+  margin-top: 20px;
+  padding: 15px;
+  border-radius: 4px;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+/* Панель администратора */
+#adminPanel {
+  margin-top: 30px;
+  padding: 20px;
+  background-color: #fff;
+  border: 2px solid #007BFF;
+  border-radius: 8px;
+}
+
+/* Панель пользователя */
+#userPanel {
+  margin-top: 30px;
+  padding: 20px;
+  background-color: #fff;
+  border: 2px solid #28a745;
+  border-radius: 8px;
+}
+
+/* Поля выбора */
+select {
+  appearance: none;
+  background-color: white;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 5'%3E%3Cpath fill='%23000' d='M2 0L0 2h4zm0 5L0 3h4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px top 50%;
+  background-size: 8px 10px;
+}
+
+/* Стили для заголовков секций */
+section {
+  margin-bottom: 40px;
+}
+
+/* Дополнительные стили для мобильных устройств */
+@media (max-width: 600px) {
+  body {
+    padding: 10px;
+  }
+
+  form {
+    padding: 15px;
+  }
+
+  button {
+    font-size: 14px;
+  }
 }

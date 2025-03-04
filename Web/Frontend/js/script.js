@@ -1,62 +1,123 @@
-document.getElementById('predictionForm').addEventListener('submit', function(event) {
-  event.preventDefault();
+document.addEventListener("DOMContentLoaded", function () {
+    const loginForm = document.getElementById("loginForm");
+    const registerForm = document.getElementById("registerForm");
+    const adminPanel = document.getElementById("adminPanel");
+    const userPanel = document.getElementById("userPanel");
+    const loginSection = document.getElementById("login");
+    const registerSection = document.getElementById("registration");
 
-  // Получаем значения из формы
-  const person_age = parseFloat(document.getElementById('person_age').value);
-  const person_income = parseFloat(document.getElementById('person_income').value);
-  const person_home_ownership = document.getElementById('person_home_ownership').value;
-  const person_emp_length_value = document.getElementById('person_emp_length').value;
-  const person_emp_length = person_emp_length_value ? parseFloat(person_emp_length_value) : 0;
-  const loan_intent = document.getElementById('loan_intent').value;
-  const loan_grade = document.getElementById('loan_grade').value;
-  const loan_amnt = parseFloat(document.getElementById('loan_amnt').value);
-  const loan_int_rate_value = document.getElementById('loan_int_rate').value;
-  const loan_int_rate = loan_int_rate_value ? parseFloat(loan_int_rate_value) : 0;
-  const cb_person_default_on_file = document.getElementById('cb_person_default_on_file').value;
-  const cb_person_cred_hist_length = parseFloat(document.getElementById('cb_person_cred_hist_length').value);
-
-  // Вычисляем поле "Доля кредита от дохода" с округлением до двух знаков
-  const loan_percent_income = Number((loan_amnt / person_income).toFixed(2));
-
-  // Формируем объект данных, передаваемый на сервер
-  const formData = {
-    person_age,
-    person_income,
-    person_home_ownership,
-    person_emp_length,
-    loan_intent,
-    loan_grade,
-    loan_amnt,
-    loan_int_rate,
-    loan_percent_income,  // рассчитываемое поле
-    cb_person_default_on_file,
-    cb_person_cred_hist_length
-  };
-
-  // Отправляем данные на сервер по указанному адресу
-  fetch('http://localhost:8000/predict/', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify([formData])
-  })
-  .then(response => response.json())
-  .then(data => {
-    const resultDiv = document.getElementById('result');
-    if (data.status === "success") {
-      let html = '<h3>Результаты предсказания:</h3>';
-      data.predictions.forEach(item => {
-        // Если prediction_label равен 0, значит платежеспособность - "ДА", иначе "НЕТ"
-        const paymentAbility = item.prediction_label === 0 ? "ДА" : "НЕТ";
-        html += `<p>Возраст: ${item.person_age}, Доход: ${item.person_income}, Платежеспособность: ${paymentAbility}, Балл: ${item.prediction_score.toFixed(2)}</p>`;
-      });
-      resultDiv.innerHTML = html;
-    } else {
-      resultDiv.innerHTML = `<p>Ошибка: ${data.detail}</p>`;
+    // Элемент для отображения ошибок
+    function showError(message) {
+        let errorDiv = document.getElementById("errorMessage");
+        if (!errorDiv) {
+            errorDiv = document.createElement("div");
+            errorDiv.id = "errorMessage";
+            errorDiv.style.color = "red";
+            errorDiv.style.marginTop = "10px";
+            registerForm.appendChild(errorDiv);
+        }
+        errorDiv.innerText = message;
     }
-  })
-  .catch(error => {
-    document.getElementById('result').innerHTML = `<p>Произошла ошибка: ${error}</p>`;
-  });
+
+    // Проверяем, есть ли сохраненный токен
+    const token = localStorage.getItem("authToken");
+    const username = localStorage.getItem("username");
+
+    if (token && username) {
+        showUserInterface(username);
+    }
+
+    function showUserInterface(username) {
+        loginSection.style.display = "none";
+        registerSection.style.display = "none";
+
+        if (username === "admin") {
+            adminPanel.style.display = "block";
+        } else {
+            userPanel.style.display = "block";
+        }
+
+        addLogoutButton();
+    }
+
+    async function loginUser(username, password) {
+        const formData = new URLSearchParams();
+        formData.append("username", username);
+        formData.append("password", password);
+
+        const response = await fetch("/api/token/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formData,
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem("authToken", data.access_token);
+            localStorage.setItem("username", username);
+
+            showUserInterface(username);
+        } else {
+            alert("Ошибка входа. Проверьте логин и пароль.");
+        }
+    }
+
+    async function registerUser(username, password) {
+        const response = await fetch("/api/register/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username, password }),
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            alert("Регистрация успешна! Теперь войдите в систему.");
+        } else {
+            showError(data.detail || "Ошибка регистрации.");
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("username");
+        location.reload();
+    }
+
+    function addLogoutButton() {
+        if (!document.getElementById("logoutButton")) {
+            const logoutButton = document.createElement("button");
+            logoutButton.id = "logoutButton";
+            logoutButton.innerText = "Выйти";
+            logoutButton.style.marginTop = "20px";
+            logoutButton.addEventListener("click", logout);
+
+            if (adminPanel.style.display === "block") {
+                adminPanel.appendChild(logoutButton);
+            } else if (userPanel.style.display === "block") {
+                userPanel.appendChild(logoutButton);
+            }
+        }
+    }
+
+    if (loginForm) {
+        loginForm.addEventListener("submit", function (event) {
+            event.preventDefault();
+            const username = document.getElementById("login_username").value;
+            const password = document.getElementById("login_password").value;
+            loginUser(username, password);
+        });
+    }
+
+    if (registerForm) {
+        registerForm.addEventListener("submit", function (event) {
+            event.preventDefault();
+            const username = document.getElementById("register_username").value;
+            const password = document.getElementById("register_password").value;
+            registerUser(username, password);
+        });
+    }
 });
