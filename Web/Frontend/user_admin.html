@@ -20,6 +20,52 @@
         <a href="/admin.html">← Назад в панель админа</a>
     </section>
 
+    <section id="creditsSection">
+        <h2>Кредиты пользователя</h2>
+        <p id="noCreditsMessage" style="display: none; color: red;">Кредиты отсутствуют</p>
+        <table id="creditsTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Сумма кредита</th>
+                    <th>Ставка %</th>
+                    <th>Срок (мес.)</th>
+                    <th>Статус</th>
+                    <th>Доход</th>
+                    <th>Возраст</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Кредиты загружаются через user_admin.js -->
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Форма для добавления кредита -->
+    <section id="addCreditSection">
+        <h2>Добавить новый кредит</h2>
+        <form id="addCreditForm">
+            <input type="hidden" id="user_id" name="user_id">
+            <label>Сумма кредита: <input type="number" id="loan_amount" name="loan_amount" step="0.01" required></label><br>
+            <label>Ставка %: <input type="number" id="interest_rate" name="interest_rate" step="0.01" required></label><br>
+            <label>Срок (мес.): <input type="number" id="term_months" name="term_months" required></label><br>
+            <label>Статус кредита: <input type="text" id="status" name="status" required></label><br>
+            <label>Возраст: <input type="number" id="person_age" name="person_age" required></label><br>
+            <label>Доход: <input type="number" id="person_income" name="person_income" step="0.01" required></label><br>
+            <label>Владение жильем: <input type="text" id="person_home_ownership" name="person_home_ownership" required></label><br>
+            <label>Стаж работы (лет): <input type="number" id="person_emp_length" name="person_emp_length" required></label><br>
+            <label>Цель кредита: <input type="text" id="loan_intent" name="loan_intent" required></label><br>
+            <label>Класс кредита: <input type="text" id="loan_grade" name="loan_grade" required></label><br>
+            <label>Процент дохода на кредит: <input type="number" id="loan_percent_income" name="loan_percent_income" step="0.01" required></label><br>
+            <label>Наличие дефолта: <input type="checkbox" id="cb_person_default_on_file" name="cb_person_default_on_file"></label><br>
+            <label>Длина кредитной истории: <input type="number" id="cb_person_cred_hist_length" name="cb_person_cred_hist_length" required></label><br>
+
+            <button type="button" id="autoFillButton">🔄 Автозаполнение</button>
+            <button type="submit">Добавить кредит</button>
+        </form>
+    </section>
+
     <script src="/js/user_admin.js"></script>
 </body>
 </html>

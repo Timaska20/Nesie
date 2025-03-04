@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 
 from models import SessionLocal, User, Credit
 
+import pandas as pd
+import random
+
+csv_path = "credit_risk_dataset.csv"
+df = pd.read_csv(csv_path)
+
 # Настройка FastAPI
 app = FastAPI()
 
@@ -195,16 +201,46 @@ def make_user_admin(user_id: int, db: Session = Depends(get_db), token: str = De
     return {"message": "Пользователь теперь администратор"}
 
 
-@app.get("/admin/credits/")
-def get_all_credits(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    username = payload.get("sub")
-    is_admin = payload.get("is_admin", False)  # Получаем флаг админа
-    user = get_user_by_username(db, username)
-    if user is None or not is_admin:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
-    return db.query(Credit).all()
+@app.get("/admin/credits/{user_id}")
+def get_user_credits(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    return db.query(Credit).filter(Credit.user_id == user_id).all()
 
+@app.put("/admin/credits/{credit_id}")
+def update_credit(credit_id: int, updated_data: CreditCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    credit = db.query(Credit).filter(Credit.id == credit_id).first()
+    for key, value in updated_data.dict().items():
+        setattr(credit, key, value)
+    db.commit()
+    return credit
+
+@app.delete("/admin/credits/{credit_id}")
+def delete_credit(credit_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    db.query(Credit).filter(Credit.id == credit_id).delete()
+    db.commit()
+    return {"message": "Кредит удалён"}
+
+
+df["loan_status"] = pd.to_numeric(df["loan_status"], errors="coerce")
+
+@app.get("/sample_credit/{loan_status}")
+def get_sample_credit(loan_status: int):
+    if loan_status not in [0, 1]:
+        raise HTTPException(status_code=400, detail="loan_status должен быть 0 или 1")
+
+    filtered_df = df[df["loan_status"] == loan_status]
+    if filtered_df.empty:
+        raise HTTPException(status_code=404, detail="Нет данных с таким loan_status")
+
+    sample = filtered_df.sample(1).iloc[0].to_dict()
+
+    # Преобразуем в нужные форматы
+    sample["loan_amnt"] = float(sample["loan_amnt"])
+    sample["loan_int_rate"] = float(sample["loan_int_rate"])
+    sample["term_months"] = 36  # Стандартный срок
+    sample["person_income"] = float(sample["person_income"])
+    sample["person_age"] = int(sample["person_age"])
+
+    return sample
 
 # Запуск сервера
 if __name__ == "__main__":
