@@ -39,16 +39,28 @@ document.addEventListener("DOMContentLoaded", function () {
             const username = document.getElementById("register_username").value;
             const password = document.getElementById("register_password").value;
 
+            const formData = new URLSearchParams();
+            formData.append("username", username);
+            formData.append("password", password);
+
             const response = await fetch("/api/register/", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password })
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formData
             });
 
             if (response.ok) {
-                alert("Регистрация успешна! Войдите в систему.");
+                const data = await response.json();
+                saveToken(data.access_token);
+
+                const user = await getUserRole();
+                if (user) {
+                    window.location.href = user.is_admin ? "admin.html" : "user.html";
+                }
             } else {
-                alert("Ошибка регистрации.");
+                alert("Ошибка регистрации. Возможно, пользователь уже существует.");
             }
         });
     }
