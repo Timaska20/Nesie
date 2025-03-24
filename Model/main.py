@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -98,18 +99,23 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
 
 # Эндпоинты
-@app.post("/register/", response_model=UserCreate)
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    existing_user = get_user_by_username(db, user.username)
+@app.post("/register/", response_model=Token)
+def register_user(
+        username: str = Form(...),
+        password: str = Form(...),
+        db: Session = Depends(get_db)
+):
+    existing_user = get_user_by_username(db, username)
     if existing_user:
         raise HTTPException(status_code=400, detail="Пользователь уже существует")
-    hashed_password = get_password_hash(user.password)
-    new_user = User(username=user.username, password=hashed_password)
+    hashed_password = get_password_hash(password)
+    new_user = User(username=username, password=hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
-
+    # Сразу создаем токен
+    access_token = create_access_token(data={"sub": new_user.username, "is_admin": new_user.is_admin})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/token/", response_model=Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
