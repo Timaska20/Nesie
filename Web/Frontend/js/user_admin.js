@@ -1,6 +1,6 @@
 document.addEventListener("DOMContentLoaded", async function () {
     const urlParams = new URLSearchParams(window.location.search);
-    const userId = urlParams.get("id") || urlParams.get("user_id"); // подстраховка
+    const userId = urlParams.get("id") || urlParams.get("user_id");
     const token = localStorage.getItem("access_token");
 
     const headers = {
@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     document.getElementById("user_id").value = userId;
 
-    // --- Загрузка и отображение информации о пользователе ---
+    // --- Информация о пользователе ---
     try {
         const res = await fetch("/api/admin/users/", { headers });
         const users = await res.json();
@@ -81,7 +81,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         }
     });
 
-    // --- Загрузка кредитов пользователя ---
+    // --- Загрузка кредитов ---
     try {
         const res = await fetch(`/api/admin/credits/${userId}`, { headers });
         const credits = await res.json();
@@ -102,11 +102,15 @@ document.addEventListener("DOMContentLoaded", async function () {
                     <td>${credit.status}</td>
                     <td>${credit.person_income}</td>
                     <td>${credit.person_age}</td>
-                    <td><button class="deleteCreditButton" data-id="${credit.id}">Удалить</button></td>
+                    <td>
+                        <button class="editCreditButton" data-id="${credit.id}">Изменить</button>
+                        <button class="deleteCreditButton" data-id="${credit.id}">Удалить</button>
+                    </td>
                 `;
                 tableBody.appendChild(row);
             });
 
+            // --- Обработчики удаления ---
             document.querySelectorAll(".deleteCreditButton").forEach(button => {
                 button.addEventListener("click", async () => {
                     const creditId = button.dataset.id;
@@ -127,21 +131,43 @@ document.addEventListener("DOMContentLoaded", async function () {
                     }
                 });
             });
+
+            // --- Обработчики редактирования ---
+            document.querySelectorAll(".editCreditButton").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const creditId = button.dataset.id;
+                    const credit = credits.find(c => c.id == creditId);
+
+                    if (!credit) return alert("Кредит не найден");
+
+                    // Заполнение формы значениями
+                    Object.entries(credit).forEach(([key, value]) => {
+                        const el = document.getElementById(key);
+                        if (el) {
+                            if (el.type === "checkbox") {
+                                el.checked = value;
+                            } else {
+                                el.value = value;
+                            }
+                        }
+                    });
+
+                    document.getElementById("addCreditForm").dataset.editingId = creditId;
+                    alert("Форма загружена для редактирования кредита");
+                });
+            });
         }
     } catch (err) {
         console.error("Ошибка при загрузке кредитов:", err);
     }
 
-    // --- Автозаполнение формы ---
-    const autoFillButton = document.getElementById("autoFillButton");
-    autoFillButton.addEventListener("click", async () => {
+    // --- Автозаполнение ---
+    document.getElementById("autoFillButton").addEventListener("click", async () => {
         const loanStatus = Math.random() > 0.5 ? 1 : 0;
 
         try {
             const res = await fetch(`/api/sample_credit/${loanStatus}`, { headers });
             const data = await res.json();
-
-            if (!res.ok) throw new Error("Не удалось получить пример кредита");
 
             document.getElementById("loan_amount").value = data.loan_amnt;
             document.getElementById("interest_rate").value = data.loan_int_rate;
@@ -157,14 +183,13 @@ document.addEventListener("DOMContentLoaded", async function () {
             document.getElementById("cb_person_default_on_file").checked = data.cb_person_default_on_file;
             document.getElementById("cb_person_cred_hist_length").value = data.cb_person_cred_hist_length;
 
-            alert("Форма заполнена!");
+            alert("Форма автозаполнена!");
         } catch (err) {
             console.error("Ошибка при автозаполнении:", err);
-            alert("Ошибка автозаполнения");
         }
     });
 
-    // --- Обработка формы добавления кредита ---
+    // --- Добавление или обновление кредита ---
     document.getElementById("addCreditForm").addEventListener("submit", async function (event) {
         event.preventDefault();
 
@@ -185,9 +210,13 @@ document.addEventListener("DOMContentLoaded", async function () {
 
         creditData["user_id"] = parseInt(userId);
 
+        const editingId = this.dataset.editingId;
+        const url = editingId ? `/api/admin/credits/${editingId}` : "/api/admin/credits/";
+        const method = editingId ? "PUT" : "POST";
+
         try {
-            const res = await fetch("/api/admin/credits/", {
-                method: "POST",
+            const res = await fetch(url, {
+                method,
                 headers,
                 body: JSON.stringify(creditData)
             });
@@ -195,14 +224,15 @@ document.addEventListener("DOMContentLoaded", async function () {
             const data = await res.json();
 
             if (!res.ok) {
-                throw new Error(data.detail || "Ошибка добавления кредита");
+                throw new Error(data.detail || "Ошибка сохранения кредита");
             }
 
-            alert("Кредит успешно добавлен!");
+            alert(editingId ? "Кредит обновлён!" : "Кредит добавлен!");
+            delete this.dataset.editingId;
+            this.reset();
             location.reload();
         } catch (err) {
-            console.error("Ошибка:", err);
-            alert(err.message);
+            alert("Ошибка: " + err.message);
         }
     });
 });

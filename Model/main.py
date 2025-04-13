@@ -12,8 +12,12 @@ from models import SessionLocal, User, Credit
 
 import pandas as pd
 import random
+from pycaret.classification import load_model, predict_model
+import numpy as np
 
 csv_path = "credit_risk_dataset.csv"
+# Загружаем модель один раз при старте
+model = load_model("my_pipeline")  # замените на актуальное имя вашей модели
 df = pd.read_csv(csv_path)
 
 # Настройка FastAPI
@@ -123,6 +127,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     if not user or not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=400, detail="Неверное имя пользователя или пароль")
     access_token = create_access_token(data={"sub": user.username, "is_admin": user.is_admin})
+    print({"sub": user.username, "is_admin": user.is_admin})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -135,8 +140,11 @@ def get_user_info(db: Session = Depends(get_db), token: str = Depends(oauth2_sch
     if not user:
         raise HTTPException(status_code=401, detail="Неавторизованный доступ")
 
-    return {"username": user.username, "is_admin": user.is_admin}
-
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin
+    }
 
 @app.post("/admin/credits/")
 def add_credit_history(credit_data: CreditCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
@@ -206,7 +214,7 @@ def make_user_admin(user_id: int, db: Session = Depends(get_db), token: str = De
 
     return {"message": "Пользователь теперь администратор"}
 
-
+# TODO Настроить видимость для админа и пользывателей
 @app.get("/admin/credits/{user_id}")
 def get_user_credits(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
     return db.query(Credit).filter(Credit.user_id == user_id).all()
@@ -247,6 +255,63 @@ def get_sample_credit(loan_status: int):
     sample["person_age"] = int(sample["person_age"])
 
     return sample
+
+
+@app.post("/predict/{user_id}")
+def predict_for_user(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    try:
+        # Проверка токена
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=403, detail="Недопустимый токен")
+
+        # Получение последнего кредита по user_id
+        credit = (
+            db.query(Credit)
+            .filter(Credit.user_id == user_id)
+            .order_by(Credit.id.desc())
+            .first()
+        )
+
+        if not credit:
+            raise HTTPException(status_code=404, detail="Кредиты для пользователя не найдены")
+
+        # Преобразуем объект в DataFrame
+        credit_data = {
+            "person_age": credit.person_age,
+            "person_income": credit.person_income,
+            "person_home_ownership": credit.person_home_ownership,
+            "person_emp_length": credit.person_emp_length,
+            "loan_intent": credit.loan_intent,
+            "loan_grade": credit.loan_grade,
+            "loan_amnt": credit.loan_amount,
+            "loan_int_rate": credit.interest_rate,
+            "loan_percent_income": credit.loan_percent_income,
+            "cb_person_default_on_file": "Y" if credit.cb_person_default_on_file else "N",
+            "cb_person_cred_hist_length": credit.cb_person_cred_hist_length,
+        }
+
+        df = pd.DataFrame([credit_data])
+
+        # Признаки-инженерия
+        df['loan_to_income_ratio'] = df['loan_amnt'] / df['person_income']
+        df['loan_to_emp_length_ratio'] = df['loan_amnt'] / (df['person_emp_length'] + 1)
+        df['int_rate_to_loan_amt_ratio'] = df['loan_int_rate'] / df['loan_amnt']
+        df['adjusted_age'] = np.log1p(df['person_age'])
+
+        # Предсказание
+        prediction = predict_model(model, data=df)
+        result = prediction[["prediction_label", "prediction_score"]].iloc[0].to_dict()
+
+        return {
+            "user_id": user_id,
+            "credit_id": credit.id,
+            "prediction": result
+        }
+
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Ошибка аутентификации")
 
 # Запуск сервера
 if __name__ == "__main__":
