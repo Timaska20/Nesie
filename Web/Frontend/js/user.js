@@ -80,7 +80,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const data = await res.json();
 
-        if (data.prediction && data.prediction.prediction_label === 0) {
+        if (data.prediction && data.prediction.prediction_label === 1) {
           predictResult.textContent = "Кредит одобрен ✅";
           predictResult.style.color = "green";
         } else {
