@@ -2,7 +2,7 @@ import httpx
 from dotenv import load_dotenv
 from datetime import datetime, date
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends,Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import Form
@@ -378,40 +378,38 @@ def delete_credit(credit_id: int, db: Session = Depends(get_db), token: str = De
 
 df["loan_status"] = pd.to_numeric(df["loan_status"], errors="coerce")
 
+
 @app.post("/find-credits/")
 def find_similar_credits(
-    personal_data: PersonalDataCreate,
-    db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+        personal_data: PersonalDataCreate,
+        db: Session = Depends(get_db),
+        token: str = Depends(oauth2_scheme),
+        filter_type: str = Query("ALL", regex="^(ALL|BEST)$")
 ):
     try:
-        # Проверка токена
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         if username is None:
             raise HTTPException(status_code=403, detail="Недопустимый токен")
 
-        # Получаем курс валют
         latest_rate = db.query(ExchangeRate).order_by(ExchangeRate.date.desc()).first()
         if not latest_rate:
             raise HTTPException(status_code=500, detail="Нет доступных курсов валют")
 
         usd_to_kzt = latest_rate.kzt
-
-        # Конвертация: месячный доход тенге -> годовой -> USD
         monthly_income_kzt = personal_data.person_income
         annual_income_kzt = monthly_income_kzt * 12
         annual_income_usd = annual_income_kzt / usd_to_kzt
 
-        # 1️⃣ Фильтруем похожие кредиты
         filtered_df = df[
             (df['loan_status'] == 0) &
             (df['person_home_ownership'] == personal_data.person_home_ownership) &
             (df['person_emp_length'].notnull()) &
-            (df['person_emp_length'].between(personal_data.person_emp_length - 1, personal_data.person_emp_length + 1)) &
+            (df['person_emp_length'].between(personal_data.person_emp_length - 1,
+                                             personal_data.person_emp_length + 1)) &
             (df['person_age'].between(personal_data.person_age - 5, personal_data.person_age + 5)) &
             (df['person_income'].between(annual_income_usd * 0.8, annual_income_usd * 1.2))
-        ]
+            ]
 
         if filtered_df.empty:
             return {"message": "Не найдено похожих кредитов", "total_found": 0}
@@ -420,7 +418,6 @@ def find_similar_credits(
 
         for credit in credits_list:
             try:
-                # Перевод дохода и суммы кредита в тенге
                 if credit.get("person_income") is not None:
                     income_kzt_annual = credit["person_income"] * usd_to_kzt
                     credit["person_income_kzt_annual"] = round(income_kzt_annual, 2)
@@ -448,17 +445,15 @@ def find_similar_credits(
                     "cb_person_cred_hist_length": 1
                 }])
 
-                # Добавляем признаки
                 model_input['loan_to_income_ratio'] = model_input['loan_amnt'] / model_input['person_income']
-                model_input['loan_to_emp_length_ratio'] = model_input['loan_amnt'] / (model_input['person_emp_length'] + 1)
+                model_input['loan_to_emp_length_ratio'] = model_input['loan_amnt'] / (
+                            model_input['person_emp_length'] + 1)
                 model_input['int_rate_to_loan_amt_ratio'] = model_input['loan_int_rate'] / model_input['loan_amnt']
                 model_input['adjusted_age'] = np.log1p(model_input['person_age'])
 
-                # Прогнозируем
                 prediction = predict_model(model, data=model_input)
                 result = prediction[["prediction_label", "prediction_score"]].iloc[0].to_dict()
 
-                # Добавляем прогноз + ДАННЫЕ клиента в ответ
                 credit["client_prediction"] = {
                     "prediction_label": result["prediction_label"],
                     "prediction_score": round(result["prediction_score"], 4),
@@ -471,6 +466,29 @@ def find_similar_credits(
             except Exception as e:
                 credit["client_prediction"] = f"Ошибка прогноза: {str(e)}"
 
+        if filter_type == "BEST":
+            best_offers = []
+            seen_intents = set()
+
+            grouped = {}
+            for credit in credits_list:
+                pred = credit.get("client_prediction", {})
+                if isinstance(pred, dict) and pred.get("prediction_label") == 0.0 and pred.get("prediction_score",
+                                                                                               0) > 0.8:
+                    intent = credit.get("loan_intent")
+                    if intent not in grouped:
+                        grouped[intent] = []
+                    grouped[intent].append(credit)
+
+            for intent, offers in grouped.items():
+                best = max(offers, key=lambda x: (
+                    x.get("loan_amnt_kzt", 0),
+                    -(x.get("loan_int_rate") if x.get("loan_int_rate") is not None else 1000)
+                ))
+                best_offers.append(best)
+
+            credits_list = best_offers
+
         return {
             "client_income_tenge_month": monthly_income_kzt,
             "client_income_tenge_annual": annual_income_kzt,
@@ -481,6 +499,7 @@ def find_similar_credits(
 
     except JWTError:
         raise HTTPException(status_code=403, detail="Ошибка аутентификации")
+
 @app.get("/sample_credit/{loan_status}")
 def get_sample_credit(loan_status: int):
     if loan_status not in [0, 1]:
