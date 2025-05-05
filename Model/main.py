@@ -406,7 +406,7 @@ def find_similar_credits(
             (df['person_home_ownership'] == personal_data.person_home_ownership) &
             (df['person_emp_length'].notnull()) &
             (df['person_age'].between(personal_data.person_age - 5, personal_data.person_age + 5)) &
-            (df['person_income'].between(annual_income_usd * 0.8, annual_income_usd * 1.2))
+            (df['person_income'].between(annual_income_usd * 0.8, annual_income_usd))
             ]
 
         if filtered_df.empty:
@@ -426,6 +426,7 @@ def find_similar_credits(
 
                 if credit.get("loan_amnt") is not None:
                     credit["loan_amnt_kzt"] = round(credit["loan_amnt"] * usd_to_kzt, 2)
+
                 else:
                     credit["loan_amnt_kzt"] = None
 
@@ -438,16 +439,10 @@ def find_similar_credits(
                     "loan_grade": credit.get("loan_grade", "C"),
                     "loan_amnt": credit.get("loan_amnt", 5000),
                     "loan_int_rate": credit.get("loan_int_rate", 15.0),
-                    "loan_percent_income": credit.get("loan_percent_income", 0.2),
+                    "loan_percent_income": credit.get("loan_amnt", 5000)/annual_income_usd,
                     "cb_person_default_on_file": "N",
-                    "cb_person_cred_hist_length": 1
+                    "cb_person_cred_hist_length": credit.get("cb_person_cred_hist_length",1)
                 }])
-
-                model_input['loan_to_income_ratio'] = model_input['loan_amnt'] / model_input['person_income']
-                model_input['loan_to_emp_length_ratio'] = model_input['loan_amnt'] / (
-                            model_input['person_emp_length'] + 1)
-                model_input['int_rate_to_loan_amt_ratio'] = model_input['loan_int_rate'] / model_input['loan_amnt']
-                model_input['adjusted_age'] = np.log1p(model_input['person_age'])
 
                 prediction = predict_model(model, data=model_input)
                 result = prediction[["prediction_label", "prediction_score"]].iloc[0].to_dict()
@@ -457,6 +452,7 @@ def find_similar_credits(
                     "prediction_score": round(result["prediction_score"], 4),
                     "client_person_age": personal_data.person_age,
                     "client_person_income_usd_annual": round(annual_income_usd, 2),
+                    "client_person_income_kzt_annual": round(annual_income_usd*usd_to_kzt, 2),
                     "client_person_home_ownership": personal_data.person_home_ownership,
                     "client_person_emp_length": personal_data.person_emp_length
                 }
