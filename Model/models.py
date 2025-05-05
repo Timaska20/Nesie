@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
@@ -12,6 +12,16 @@ Base = declarative_base()
 engine = create_engine(DATABASE_URL, echo=True)  # echo=True для отладки
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+#Курсы валют
+class ExchangeRate(Base):
+    __tablename__ = 'exchange_rates'
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, index=True, nullable=False)
+    usd = Column(Float, nullable=False)
+    eur = Column(Float, nullable=False)
+    rub = Column(Float, nullable=False)
+    kzt = Column(Float, nullable=False)
+
 # Модель пользователя
 class User(Base):
     __tablename__ = 'users'
@@ -20,6 +30,13 @@ class User(Base):
     password = Column(String, nullable=False)
     is_admin = Column(Boolean, default=False)
 
+    personal_data = relationship(
+        "PersonalData",
+        back_populates="user",
+        cascade="all, delete",
+        uselist=False  # один-к-одному
+    )
+
     # Отношение с кредитами, с каскадным удалением
     credits = relationship(
         "Credit",
@@ -27,6 +44,19 @@ class User(Base):
         cascade="all, delete",
         passive_deletes=True
     )
+
+
+class PersonalData(Base):
+    __tablename__ = 'personal_data'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True)
+
+    person_age = Column(Integer, nullable=False)
+    person_income = Column(Float, nullable=False)
+    person_home_ownership = Column(String, nullable=False)
+    person_emp_length = Column(Integer, nullable=False)
+
+    user = relationship("User", back_populates="personal_data")
 
 # Модель кредита
 class Credit(Base):

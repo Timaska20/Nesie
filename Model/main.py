@@ -1,24 +1,30 @@
+import httpx
+from dotenv import load_dotenv
+from datetime import datetime, date
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from jose import JWTError, jwt
+from jose import JWTError, jwt, ExpiredSignatureError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-from models import SessionLocal, User, Credit
+from models import SessionLocal, User,  PersonalData, Credit, ExchangeRate
 
 import pandas as pd
 import random
 from pycaret.classification import load_model, predict_model
 import numpy as np
+import os
 
 csv_path = "credit_risk_dataset.csv"
 # Загружаем модель один раз при старте
 model = load_model("my_pipeline")  # замените на актуальное имя вашей модели
 df = pd.read_csv(csv_path)
+OPEN_EXCHANGE_APP_ID = os.getenv("OPEN_EXCHANGE_APP_ID")
 
 # Настройка FastAPI
 app = FastAPI()
@@ -59,6 +65,13 @@ class UserCreate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class PersonalDataCreate(BaseModel):
+    person_age: int
+    person_income: float
+    person_home_ownership: str
+    person_emp_length: int
 
 
 class CreditCreate(BaseModel):
@@ -103,6 +116,60 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
 
 # Эндпоинты
+
+@app.get("/currency-rates/")
+async def get_currency_rates(db: Session = Depends(get_db)):
+    today = date.today()
+    existing_rate = db.query(ExchangeRate).filter(ExchangeRate.date == today).first()
+
+    if not existing_rate:
+        if not OPEN_EXCHANGE_APP_ID:
+            raise HTTPException(status_code=500, detail=f"Токен не найден {OPEN_EXCHANGE_APP_ID}")
+
+        url = f"https://openexchangerates.org/api/latest.json?app_id={OPEN_EXCHANGE_APP_ID}&symbols=USD,RUB,EUR,KZT"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+                data = response.json()
+
+            rates = data.get("rates", {})
+            usd_rate = rates.get("USD", 1)
+            eur_rate = rates.get("EUR")
+            rub_rate = rates.get("RUB")
+            kzt_rate = rates.get("KZT")
+
+            if not all([eur_rate, rub_rate, kzt_rate]):
+                raise HTTPException(status_code=500, detail="Некорректные данные от API")
+
+            new_rate = ExchangeRate(
+                date=today,
+                usd=usd_rate,
+                eur=eur_rate,
+                rub=rub_rate,
+                kzt=kzt_rate
+            )
+            db.add(new_rate)
+            db.commit()
+            existing_rate = new_rate
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка при получении курса валют: {str(e)}")
+
+    BUY_SPREAD = 0.005  # 0.5% комиссия на покупку
+    SELL_SPREAD = 0.01  # 1% комиссия на продажу
+
+    def calculate_rate(nominal):
+        buy = round((existing_rate.kzt / nominal) * (1 - BUY_SPREAD), 2)
+        sell = round((existing_rate.kzt / nominal) * (1 + SELL_SPREAD), 2)
+        return {"buy": buy, "sell": sell}
+
+    return {
+        "eur": calculate_rate(existing_rate.eur),
+        "rub": calculate_rate(existing_rate.rub),
+        "usd": calculate_rate(existing_rate.usd)
+    }
+
 @app.post("/register/", response_model=Token)
 def register_user(
         username: str = Form(...),
@@ -146,6 +213,81 @@ def get_user_info(db: Session = Depends(get_db), token: str = Depends(oauth2_sch
         "is_admin": user.is_admin
     }
 
+@app.get("/personal-data/")
+def get_personal_data(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        user = get_user_by_username(db, username)
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Пользователь не найден")
+
+        personal_data = db.query(PersonalData).filter(PersonalData.user_id == user.id).first()
+
+        if not personal_data:
+            raise HTTPException(status_code=404, detail=f"Персональные данные не найдены для {username} с ID {user.id}")
+
+        return {
+            "person_age": personal_data.person_age,
+            "person_income": personal_data.person_income,
+            "person_home_ownership": personal_data.person_home_ownership,
+            "person_emp_length": personal_data.person_emp_length
+        }
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Токен истек. Выполните повторный вход.")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Ошибка аутентификации")
+
+@app.post("/personal-data/")
+def add_or_update_personal_data(
+    personal_data: PersonalDataCreate,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    # Получаем текущего пользователя по токену
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Пользователь не найден")
+
+    # Проверяем, есть ли персональные данные для этого пользователя
+    existing_data = db.query(PersonalData).filter(PersonalData.user_id == user.id).first()
+
+    if existing_data:
+        # Обновляем существующие данные
+        existing_data.person_age = personal_data.person_age
+        existing_data.person_income = personal_data.person_income
+        existing_data.person_home_ownership = personal_data.person_home_ownership
+        existing_data.person_emp_length = personal_data.person_emp_length
+        db.commit()
+        db.refresh(existing_data)
+        return {"message": "Персональные данные обновлены", "data": {
+            "person_age": existing_data.person_age,
+            "person_income": existing_data.person_income,
+            "person_home_ownership": existing_data.person_home_ownership,
+            "person_emp_length": existing_data.person_emp_length
+        }}
+    else:
+        # Добавляем новые данные
+        new_data = PersonalData(
+            user_id=user.id,
+            person_age=personal_data.person_age,
+            person_income=personal_data.person_income,
+            person_home_ownership=personal_data.person_home_ownership,
+            person_emp_length=personal_data.person_emp_length
+        )
+        db.add(new_data)
+        db.commit()
+        db.refresh(new_data)
+        return {"message": "Персональные данные добавлены", "data": {
+            "person_age": new_data.person_age,
+            "person_income": new_data.person_income,
+            "person_home_ownership": new_data.person_home_ownership,
+            "person_emp_length": new_data.person_emp_length
+        }}
 @app.post("/admin/credits/")
 def add_credit_history(credit_data: CreditCreate, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -236,6 +378,109 @@ def delete_credit(credit_id: int, db: Session = Depends(get_db), token: str = De
 
 df["loan_status"] = pd.to_numeric(df["loan_status"], errors="coerce")
 
+@app.post("/find-credits/")
+def find_similar_credits(
+    personal_data: PersonalDataCreate,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    try:
+        # Проверка токена
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=403, detail="Недопустимый токен")
+
+        # Получаем курс валют
+        latest_rate = db.query(ExchangeRate).order_by(ExchangeRate.date.desc()).first()
+        if not latest_rate:
+            raise HTTPException(status_code=500, detail="Нет доступных курсов валют")
+
+        usd_to_kzt = latest_rate.kzt
+
+        # Конвертация: месячный доход тенге -> годовой -> USD
+        monthly_income_kzt = personal_data.person_income
+        annual_income_kzt = monthly_income_kzt * 12
+        annual_income_usd = annual_income_kzt / usd_to_kzt
+
+        # 1️⃣ Фильтруем похожие кредиты
+        filtered_df = df[
+            (df['loan_status'] == 0) &
+            (df['person_home_ownership'] == personal_data.person_home_ownership) &
+            (df['person_emp_length'].notnull()) &
+            (df['person_emp_length'].between(personal_data.person_emp_length - 1, personal_data.person_emp_length + 1)) &
+            (df['person_age'].between(personal_data.person_age - 5, personal_data.person_age + 5)) &
+            (df['person_income'].between(annual_income_usd * 0.8, annual_income_usd * 1.2))
+        ]
+
+        if filtered_df.empty:
+            return {"message": "Не найдено похожих кредитов", "total_found": 0}
+
+        credits_list = filtered_df.replace({np.nan: None, np.inf: None, -np.inf: None}).to_dict(orient='records')
+
+        for credit in credits_list:
+            try:
+                # Перевод дохода и суммы кредита в тенге
+                if credit.get("person_income") is not None:
+                    income_kzt_annual = credit["person_income"] * usd_to_kzt
+                    credit["person_income_kzt_annual"] = round(income_kzt_annual, 2)
+                    credit["person_income_kzt_monthly"] = round(income_kzt_annual / 12, 2)
+                else:
+                    credit["person_income_kzt_annual"] = None
+                    credit["person_income_kzt_monthly"] = None
+
+                if credit.get("loan_amnt") is not None:
+                    credit["loan_amnt_kzt"] = round(credit["loan_amnt"] * usd_to_kzt, 2)
+                else:
+                    credit["loan_amnt_kzt"] = None
+
+                model_input = pd.DataFrame([{
+                    "person_age": personal_data.person_age,
+                    "person_income": annual_income_usd,
+                    "person_home_ownership": personal_data.person_home_ownership,
+                    "person_emp_length": personal_data.person_emp_length,
+                    "loan_intent": credit.get("loan_intent", "PERSONAL"),
+                    "loan_grade": credit.get("loan_grade", "C"),
+                    "loan_amnt": credit.get("loan_amnt", 5000),
+                    "loan_int_rate": credit.get("loan_int_rate", 15.0),
+                    "loan_percent_income": credit.get("loan_percent_income", 0.2),
+                    "cb_person_default_on_file": "N",
+                    "cb_person_cred_hist_length": 1
+                }])
+
+                # Добавляем признаки
+                model_input['loan_to_income_ratio'] = model_input['loan_amnt'] / model_input['person_income']
+                model_input['loan_to_emp_length_ratio'] = model_input['loan_amnt'] / (model_input['person_emp_length'] + 1)
+                model_input['int_rate_to_loan_amt_ratio'] = model_input['loan_int_rate'] / model_input['loan_amnt']
+                model_input['adjusted_age'] = np.log1p(model_input['person_age'])
+
+                # Прогнозируем
+                prediction = predict_model(model, data=model_input)
+                result = prediction[["prediction_label", "prediction_score"]].iloc[0].to_dict()
+
+                # Добавляем прогноз + ДАННЫЕ клиента в ответ
+                credit["client_prediction"] = {
+                    "prediction_label": result["prediction_label"],
+                    "prediction_score": round(result["prediction_score"], 4),
+                    "client_person_age": personal_data.person_age,
+                    "client_person_income_usd_annual": round(annual_income_usd, 2),
+                    "client_person_home_ownership": personal_data.person_home_ownership,
+                    "client_person_emp_length": personal_data.person_emp_length
+                }
+
+            except Exception as e:
+                credit["client_prediction"] = f"Ошибка прогноза: {str(e)}"
+
+        return {
+            "client_income_tenge_month": monthly_income_kzt,
+            "client_income_tenge_annual": annual_income_kzt,
+            "client_income_usd_annual": round(annual_income_usd, 2),
+            "total_found": len(credits_list),
+            "credits": credits_list
+        }
+
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Ошибка аутентификации")
 @app.get("/sample_credit/{loan_status}")
 def get_sample_credit(loan_status: int):
     if loan_status not in [0, 1]:

@@ -23,6 +23,8 @@ services:
       - db
     networks:
       - app-network
+    env_file:
+      - ./Model/.env
 
   frontend:
     build: ./Web
