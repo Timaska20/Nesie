@@ -405,8 +405,6 @@ def find_similar_credits(
             (df['loan_status'] == 0) &
             (df['person_home_ownership'] == personal_data.person_home_ownership) &
             (df['person_emp_length'].notnull()) &
-            (df['person_emp_length'].between(personal_data.person_emp_length - 1,
-                                             personal_data.person_emp_length + 1)) &
             (df['person_age'].between(personal_data.person_age - 5, personal_data.person_age + 5)) &
             (df['person_income'].between(annual_income_usd * 0.8, annual_income_usd * 1.2))
             ]
