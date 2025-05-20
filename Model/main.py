@@ -1,28 +1,37 @@
-import httpx
-from dotenv import load_dotenv
-from datetime import datetime, date
+import os
+import io
+import base64
+import random
+from datetime import datetime, date, timedelta
 
-from fastapi import FastAPI, HTTPException, Depends,Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi import Form
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+import httpx
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import shap
+
+from dotenv import load_dotenv
 from jose import JWTError, jwt, ExpiredSignatureError
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from models import SessionLocal, User,  PersonalData, Credit, ExchangeRate
+from fastapi import FastAPI, HTTPException, Depends, Form, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
 
-import pandas as pd
-import random
 from pycaret.classification import load_model, predict_model
-import numpy as np
-import os
+from scipy.special import expit
+import shap
+
+from models import SessionLocal, User, PersonalData, Credit, ExchangeRate
 
 csv_path = "credit_risk_dataset.csv"
 # Загружаем модель один раз при старте
 model = load_model("my_pipeline")  # замените на актуальное имя вашей модели
+catboost_model = model.named_steps['trained_model']
+
 df = pd.read_csv(csv_path)
 OPEN_EXCHANGE_APP_ID = os.getenv("OPEN_EXCHANGE_APP_ID")
 
@@ -113,6 +122,19 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+class CreditExplanation(BaseModel):
+    person_age: int
+    person_income: float
+    person_home_ownership: str
+    person_emp_length: int
+    loan_intent: str
+    loan_grade: str
+    loan_amnt: float
+    loan_int_rate: float
+    loan_percent_income: float
+    cb_person_default_on_file: bool
+    cb_person_cred_hist_length: int
 
 
 # Эндпоинты
@@ -571,8 +593,145 @@ def predict_for_user(user_id: int, db: Session = Depends(get_db), token: str = D
     except JWTError:
         raise HTTPException(status_code=403, detail="Ошибка аутентификации")
 
+
+@app.post("/explain")
+def explain_from_input(credit_data: CreditExplanation, token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if not payload.get("sub"):
+            raise HTTPException(status_code=403, detail="Недопустимый токен")
+
+        loan_amnt = credit_data.loan_amnt
+
+        raw_data = pd.DataFrame([{
+            "person_age": credit_data.person_age,
+            "person_income": credit_data.person_income,
+            "person_home_ownership": credit_data.person_home_ownership,
+            "person_emp_length": credit_data.person_emp_length,
+            "loan_intent": credit_data.loan_intent,
+            "loan_grade": credit_data.loan_grade,
+            "loan_amnt": loan_amnt,
+            "loan_int_rate": credit_data.loan_int_rate,
+            "loan_percent_income": credit_data.loan_percent_income,
+            "cb_person_default_on_file": "Y" if credit_data.cb_person_default_on_file else "N",
+            "cb_person_cred_hist_length": credit_data.cb_person_cred_hist_length,
+            "loan_to_income_ratio": loan_amnt / credit_data.person_income,
+            "loan_to_emp_length_ratio": loan_amnt / (credit_data.person_emp_length + 1),
+            "int_rate_to_loan_amt_ratio": credit_data.loan_int_rate / loan_amnt,
+            "adjusted_age": np.log1p(credit_data.person_age)
+        }])
+
+        transformed = model.transform(raw_data)
+        explainer = shap.TreeExplainer(catboost_model)
+        shap_values = explainer.shap_values(transformed)
+
+        explanation = dict(zip(transformed.columns, shap_values[0]))
+        logit = explainer.expected_value + sum(shap_values[0])
+        probability = round(float(expit(logit)), 4)
+        label = int(probability >= 0.5)
+
+        return {
+            "prediction_logit": round(logit, 4),
+            "prediction_probability": probability,
+            "prediction_label": label,
+            "shap_explanation": explanation
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка объяснения: {str(e)}")
+
+
+@app.post("/explain/image")
+def explain_image(credit_data: CreditExplanation, token: str = Depends(oauth2_scheme)):
+    import shap
+    import matplotlib.pyplot as plt
+    import io
+    import base64
+    from fastapi.responses import JSONResponse
+
+    FEATURE_TRANSLATIONS = {
+        "person_age": "Возраст",
+        "person_income": "Доход",
+        "person_home_ownership_MORTGAGE": "Ипотека",
+        "person_home_ownership_RENT": "Аренда",
+        "person_home_ownership_OWN": "Собственное жильё",
+        "person_home_ownership_OTHER": "Другое жильё",
+        "person_emp_length": "Стаж работы",
+        "loan_intent_HOMEIMPROVEMENT": "Ремонт жилья",
+        "loan_intent_VENTURE": "Бизнес",
+        "loan_intent_MEDICAL": "Медицина",
+        "loan_intent_PERSONAL": "Личные нужды",
+        "loan_intent_EDUCATION": "Образование",
+        "loan_intent_DEBTCONSOLIDATION": "Погашение долгов",
+        "loan_grade_A": "Класс A",
+        "loan_grade_B": "Класс B",
+        "loan_grade_C": "Класс C",
+        "loan_grade_D": "Класс D",
+        "loan_grade_E": "Класс E",
+        "loan_grade_F": "Класс F",
+        "loan_grade_G": "Класс G",
+        "loan_amnt": "Сумма кредита",
+        "loan_int_rate": "Процентная ставка",
+        "loan_percent_income": "Доля от дохода",
+        "cb_person_default_on_file": "Просрочка ранее",
+        "cb_person_cred_hist_length": "Длина кредитной истории",
+        "loan_to_income_ratio": "Кредит / Доход",
+        "loan_to_emp_length_ratio": "Кредит / Стаж",
+        "int_rate_to_loan_amt_ratio": "Ставка / Сумма",
+        "adjusted_age": "Корректированный возраст"
+    }
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if not payload.get("sub"):
+            raise HTTPException(status_code=403, detail="Недопустимый токен")
+
+        loan_amnt = credit_data.loan_amnt
+
+        raw_data = pd.DataFrame([{
+            "person_age": credit_data.person_age,
+            "person_income": credit_data.person_income,
+            "person_home_ownership": credit_data.person_home_ownership,
+            "person_emp_length": credit_data.person_emp_length,
+            "loan_intent": credit_data.loan_intent,
+            "loan_grade": credit_data.loan_grade,
+            "loan_amnt": loan_amnt,
+            "loan_int_rate": credit_data.loan_int_rate,
+            "loan_percent_income": credit_data.loan_percent_income,
+            "cb_person_default_on_file": "Y" if credit_data.cb_person_default_on_file else "N",
+            "cb_person_cred_hist_length": credit_data.cb_person_cred_hist_length,
+            "loan_to_income_ratio": loan_amnt / credit_data.person_income,
+            "loan_to_emp_length_ratio": loan_amnt / (credit_data.person_emp_length + 1),
+            "int_rate_to_loan_amt_ratio": credit_data.loan_int_rate / loan_amnt,
+            "adjusted_age": np.log1p(credit_data.person_age)
+        }])
+
+        transformed = model.transform(raw_data)
+        explainer = shap.TreeExplainer(catboost_model)
+        shap_values = explainer.shap_values(transformed)
+
+        display_df = transformed.copy()
+        display_df.columns = [FEATURE_TRANSLATIONS.get(col, col) for col in display_df.columns]
+
+        plt.clf()
+        shap.plots._waterfall.waterfall_legacy(
+            explainer.expected_value, shap_values[0], display_df.iloc[0], show=False
+        )
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        plt.close()
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+        buf.close()
+
+        return JSONResponse(content={"image_base64": img_base64})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации изображения: {str(e)}")
+
+
 # Запуск сервера
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
