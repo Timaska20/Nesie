@@ -37,14 +37,7 @@ class User(Base):
         uselist=False  # один-к-одному
     )
 
-    # Отношение с кредитами, с каскадным удалением
-    credits = relationship(
-        "Credit",
-        back_populates="user",
-        cascade="all, delete",
-        passive_deletes=True
-    )
-
+    credits = relationship("Credit", back_populates="user")
 
 class PersonalData(Base):
     __tablename__ = 'personal_data'
@@ -60,24 +53,15 @@ class PersonalData(Base):
 
 # Модель кредита
 class Credit(Base):
-    __tablename__ = 'credits'
+    __tablename__ = "credits"
+
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-
-    loan_amount = Column(Float, nullable=False)
-    interest_rate = Column(Float, nullable=False)
-    term_months = Column(Integer, nullable=False)
-    status = Column(String, nullable=False)
-
-    person_age = Column(Integer, nullable=False)
-    person_income = Column(Float, nullable=False)
-    person_home_ownership = Column(String, nullable=False)
-    person_emp_length = Column(Integer, nullable=False)
-    loan_intent = Column(String, nullable=False)
-    loan_grade = Column(String, nullable=False)
-    loan_percent_income = Column(Float, nullable=False)
-    cb_person_default_on_file = Column(Boolean, nullable=False)
-    cb_person_cred_hist_length = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    loan_amount = Column(Float)
+    interest_rate = Column(Float)
+    term_months = Column(Integer)
+    status = Column(String, default="на рассмотрении")
+    hash = Column(String, unique=True, index=True, nullable=False)
 
     user = relationship("User", back_populates="credits")
 

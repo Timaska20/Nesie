@@ -113,6 +113,13 @@ class CreditData(BaseModel):
     cb_person_default_on_file: str = Field("N", pattern="^[YN]$")
     cb_person_cred_hist_length: int = 1
 
+class CreditRequest(BaseModel):
+    loan_amount: float
+    interest_rate: float
+    term_months: int
+    status: str = "на рассмотрении"
+    hash: str  # ✅ обязательно
+
 # Утилиты для работы с пользователями
 def get_user_by_username(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
@@ -391,7 +398,60 @@ def make_user_admin(user_id: int, db: Session = Depends(get_db), token: str = De
 
     return {"message": "Пользователь теперь администратор"}
 
-# TODO Настроить видимость для админа и пользывателей
+@app.post("/credits/")
+def submit_credit(
+    credit_data: CreditRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    # Получаем пользователя по токену
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=403, detail="Пользователь не определён")
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Неверный токен")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    existing = db.query(Credit).filter(Credit.hash == credit_data.hash).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Такой кредит уже существует")
+
+    credit = Credit(
+        user_id=user.id,
+        loan_amount=credit_data.loan_amount,
+        interest_rate=credit_data.interest_rate,
+        term_months=credit_data.term_months,
+        status=credit_data.status,
+        hash=credit_data.hash  # ✅ добавлено
+    )
+
+    db.add(credit)
+    db.commit()
+    db.refresh(credit)
+    return {"message": "Кредитная заявка подана", "credit_id": credit.id}
+
+@app.get("/credits/")
+def get_my_credits(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=403, detail="Пользователь не определён")
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Неверный токен")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    credits = db.query(Credit).filter(Credit.user_id == user.id).all()
+    return credits
+
 @app.get("/admin/credits/{user_id}")
 def get_user_credits(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
     return db.query(Credit).filter(Credit.user_id == user_id).all()
