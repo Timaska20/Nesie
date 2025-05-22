@@ -13,10 +13,10 @@ import shap
 from dotenv import load_dotenv
 from jose import JWTError, jwt, ExpiredSignatureError
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from fastapi import FastAPI, HTTPException, Depends, Form, Query
+from fastapi import FastAPI, HTTPException, Depends, Form, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -99,6 +99,19 @@ class CreditCreate(BaseModel):
     cb_person_default_on_file: bool
     cb_person_cred_hist_length: int
 
+class CreditData(BaseModel):
+    person_age: int
+    person_income: float
+    person_home_ownership: str
+    person_emp_length: float
+    loan_intent: str
+    loan_grade: str
+    loan_amnt: float
+    loan_int_rate: float
+    loan_status: int
+    loan_percent_income: float
+    cb_person_default_on_file: str = Field("N", pattern="^[YN]$")
+    cb_person_cred_hist_length: int = 1
 
 # Утилиты для работы с пользователями
 def get_user_by_username(db: Session, username: str):
@@ -536,110 +549,98 @@ def get_sample_credit(loan_status: int):
 
     return sample
 
+@app.post("/predict/")
+def predict_from_front(
+    data: dict = Body(...),
+     explain: bool = Query(False),
+     db: Session = Depends(get_db),
+     token: str = Depends(oauth2_scheme)
+ ):
+    loan_intent: str = data.get("loan_intent")
+    loan_grade: str = data.get("loan_grade")
+    loan_amount: float = data.get("loan_amount")
+    loan_int_rate: float = data.get("loan_int_rate")
+    loan_status: int = data.get("loan_status")
+    currency: str = data.get("currency")
 
-@app.post("/predict/{user_id}")
-def predict_for_user(user_id: int, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    """
+    Предсказание: если currency=="USD", loan_amount в USD/год;
+    если currency=="KZT", loan_amount в KZT/год;
+    model использует USD/год для всех.
+    """
+    # Аутентификация
     try:
-        # Проверка токена
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=403, detail="Недопустимый токен")
-
-        # Получение последнего кредита по user_id
-        credit = (
-            db.query(Credit)
-            .filter(Credit.user_id == user_id)
-            .order_by(Credit.id.desc())
-            .first()
-        )
-
-        if not credit:
-            raise HTTPException(status_code=404, detail="Кредиты для пользователя не найдены")
-
-        # Преобразуем объект в DataFrame
-        credit_data = {
-            "person_age": credit.person_age,
-            "person_income": credit.person_income,
-            "person_home_ownership": credit.person_home_ownership,
-            "person_emp_length": credit.person_emp_length,
-            "loan_intent": credit.loan_intent,
-            "loan_grade": credit.loan_grade,
-            "loan_amnt": credit.loan_amount,
-            "loan_int_rate": credit.interest_rate,
-            "loan_percent_income": credit.loan_percent_income,
-            "cb_person_default_on_file": "Y" if credit.cb_person_default_on_file else "N",
-            "cb_person_cred_hist_length": credit.cb_person_cred_hist_length,
-        }
-
-        df = pd.DataFrame([credit_data])
-
-        # Признаки-инженерия
-        df['loan_to_income_ratio'] = df['loan_amnt'] / df['person_income']
-        df['loan_to_emp_length_ratio'] = df['loan_amnt'] / (df['person_emp_length'] + 1)
-        df['int_rate_to_loan_amt_ratio'] = df['loan_int_rate'] / df['loan_amnt']
-        df['adjusted_age'] = np.log1p(df['person_age'])
-
-        # Предсказание
-        prediction = predict_model(model, data=df)
-        result = prediction[["prediction_label", "prediction_score"]].iloc[0].to_dict()
-
-        return {
-            "user_id": user_id,
-            "credit_id": credit.id,
-            "prediction": result
-        }
-
+        if not username:
+            raise JWTError()
     except JWTError:
         raise HTTPException(status_code=403, detail="Ошибка аутентификации")
 
+    # Личные данные пользователя
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    personal = db.query(PersonalData).filter(PersonalData.user_id == user.id).first()
+    if not personal:
+        raise HTTPException(status_code=404, detail="Персональные данные не найдены")
 
-@app.post("/explain")
-def explain_from_input(credit_data: CreditExplanation, token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if not payload.get("sub"):
-            raise HTTPException(status_code=403, detail="Недопустимый токен")
+    # Курс USD->KZT
+    rate = db.query(ExchangeRate).order_by(ExchangeRate.date.desc()).first()
+    if not rate:
+        raise HTTPException(status_code=500, detail="Курс валют не доступен")
+    usd_to_kzt = rate.kzt
 
-        loan_amnt = credit_data.loan_amnt
+    # Конвертация дохода personal: доход хранится в KZT/мес
+    annual_income_usd = personal.person_income * 12 / usd_to_kzt
 
-        raw_data = pd.DataFrame([{
-            "person_age": credit_data.person_age,
-            "person_income": credit_data.person_income,
-            "person_home_ownership": credit_data.person_home_ownership,
-            "person_emp_length": credit_data.person_emp_length,
-            "loan_intent": credit_data.loan_intent,
-            "loan_grade": credit_data.loan_grade,
-            "loan_amnt": loan_amnt,
-            "loan_int_rate": credit_data.loan_int_rate,
-            "loan_percent_income": credit_data.loan_percent_income,
-            "cb_person_default_on_file": "Y" if credit_data.cb_person_default_on_file else "N",
-            "cb_person_cred_hist_length": credit_data.cb_person_cred_hist_length,
-            "loan_to_income_ratio": loan_amnt / credit_data.person_income,
-            "loan_to_emp_length_ratio": loan_amnt / (credit_data.person_emp_length + 1),
-            "int_rate_to_loan_amt_ratio": credit_data.loan_int_rate / loan_amnt,
-            "adjusted_age": np.log1p(credit_data.person_age)
-        }])
+    # Конвертация суммы кредита из переданной валюты в USD/год
+    if currency.upper() == 'KZT':
+        annual_loan_usd = loan_amount / usd_to_kzt
+    elif currency.upper() == 'USD':
+        annual_loan_usd = loan_amount
+    else:
+        raise HTTPException(status_code=400, detail="currency должен быть USD или KZT")
 
-        transformed = model.transform(raw_data)
+    # Подготовка данных: читаем из JSON поля или по умолчанию
+    cb_default = data.get("cb_person_default_on_file", "N")
+    cb_hist = data.get("cb_person_cred_hist_length", 1)
+    df_input = pd.DataFrame([{
+        "person_age": personal.person_age,
+        "person_income": annual_income_usd,
+        "person_home_ownership": personal.person_home_ownership,
+        "person_emp_length": personal.person_emp_length,
+        "loan_intent": loan_intent,
+        "loan_grade": loan_grade,
+        "loan_amnt": annual_loan_usd,
+        "loan_int_rate": loan_int_rate,
+        "loan_percent_income": annual_loan_usd / annual_income_usd,
+        "cb_person_default_on_file": cb_default,
+        "cb_person_cred_hist_length": cb_hist
+    }])
+
+    # Feature engineering
+    df_input["loan_to_income_ratio"]       = df_input["loan_amnt"] / df_input["person_income"]
+    df_input["loan_to_emp_length_ratio"]   = df_input["loan_amnt"] / (df_input["person_emp_length"] + 1)
+    df_input["int_rate_to_loan_amt_ratio"] = df_input["loan_int_rate"] / df_input["loan_amnt"]
+    df_input["adjusted_age"]               = np.log1p(df_input["person_age"])
+
+    # Предсказание
+    result_df = predict_model(model, data=df_input)
+    row = result_df.iloc[0]
+    label = int(row["prediction_label"])
+    score = round(float(row["prediction_score"]), 4)
+
+    response = {"prediction_label": label, "prediction_score": score}
+
+    # SHAP при explain
+    if explain:
+        transformed = model.transform(df_input)
         explainer = shap.TreeExplainer(catboost_model)
-        shap_values = explainer.shap_values(transformed)
+        shap_vals = explainer.shap_values(transformed)
+        response["shap_explanation"] = dict(zip(transformed.columns, shap_vals[0]))
 
-        explanation = dict(zip(transformed.columns, shap_values[0]))
-        logit = explainer.expected_value + sum(shap_values[0])
-        probability = round(float(expit(logit)), 4)
-        label = int(probability >= 0.5)
-
-        return {
-            "prediction_logit": round(logit, 4),
-            "prediction_probability": probability,
-            "prediction_label": label,
-            "shap_explanation": explanation
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка объяснения: {str(e)}")
-
+    return response
 
 @app.post("/explain/image")
 def explain_image(credit_data: CreditExplanation, token: str = Depends(oauth2_scheme)):
