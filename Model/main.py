@@ -618,7 +618,7 @@ def predict_from_front(
  ):
     loan_intent: str = data.get("loan_intent")
     loan_grade: str = data.get("loan_grade")
-    loan_amount: float = data.get("loan_amount")
+    loan_amount: float = data.get("loan_amount") or data.get("loan_amnt")
     loan_int_rate: float = data.get("loan_int_rate")
     loan_status: int = data.get("loan_status")
     currency: str = data.get("currency")
