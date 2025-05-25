@@ -20,7 +20,13 @@ def create_admin():
 
     if not admin:
         hashed_password = hash_password("admin")
-        admin = User(username="admin", password=hashed_password, is_admin=True)
+        admin = admin = User(
+            username="admin",
+            password=hashed_password,
+            is_admin=True,
+            email="admin@example.com",
+            email_confirmed=True
+        )
         session.add(admin)
         session.commit()
         print("Администратор успешно создан!")

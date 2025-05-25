@@ -29,12 +29,14 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
     is_admin = Column(Boolean, default=False)
+    email = Column(String, nullable=True)
+    email_confirmed = Column(Boolean, default=False)
 
     personal_data = relationship(
         "PersonalData",
         back_populates="user",
         cascade="all, delete",
-        uselist=False  # один-к-одному
+        uselist=False
     )
 
     credits = relationship("Credit", back_populates="user")

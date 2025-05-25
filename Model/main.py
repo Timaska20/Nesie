@@ -3,6 +3,7 @@ import io
 import base64
 import random
 from datetime import datetime, date, timedelta
+import time
 
 import httpx
 import numpy as np
@@ -15,17 +16,48 @@ from jose import JWTError, jwt, ExpiredSignatureError
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 
 from fastapi import FastAPI, HTTPException, Depends, Form, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
+from fastapi import BackgroundTasks
 
 from pycaret.classification import load_model, predict_model
 from scipy.special import expit
 import shap
 
 from models import SessionLocal, User, PersonalData, Credit, ExchangeRate
+from email.mime.text import MIMEText
+import smtplib
+
+from db_init import create_tables, create_admin
+
+
+def wait_for_db(max_attempts: int = 10, delay: int = 2):
+    print("⏳ Проверка готовности БД...")
+    for attempt in range(max_attempts):
+        try:
+            db = SessionLocal()
+            db.execute(text("SELECT 1"))
+            db.close()
+            print("✅ База данных готова к подключению")
+            return
+        except OperationalError:
+            print(f"⏳ Попытка {attempt + 1}/{max_attempts} неудачна, пробуем снова через {delay} сек...")
+            time.sleep(delay)
+    raise RuntimeError("❌ Не удалось подключиться к базе данных. Проверь настройки и доступность PostgreSQL.")
+
+wait_for_db()
+
+from db_init import create_tables, create_admin
+try:
+    create_tables()
+    create_admin()
+except Exception as e:
+    print(f"[⚠️] Ошибка инициализации БД: {e}")
 
 csv_path = "credit_risk_dataset.csv"
 # Загружаем модель один раз при старте
@@ -47,6 +79,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+CONFIRM_SECRET = "your_confirm_secret"
 # Настройка токенов и безопасности
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
@@ -156,8 +190,83 @@ class CreditExplanation(BaseModel):
     cb_person_default_on_file: bool
     cb_person_cred_hist_length: int
 
+def send_email(to_email: str, confirm_url: str):
+    msg = MIMEText(f"Подтвердите email, перейдя по ссылке: {confirm_url}")
+    msg["Subject"] = "Подтверждение почты"
+    msg["From"] = os.getenv("EMAIL_USER")
+    msg["To"] = to_email
+
+    with smtplib.SMTP(os.getenv("SMTP_SERVER"), int(os.getenv("SMTP_PORT"))) as server:
+        server.starttls()
+        server.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASSWORD"))
+        server.sendmail(msg["From"], [msg["To"]], msg.as_string())
+
 
 # Эндпоинты
+
+@app.post("/send-confirmation/")
+def send_confirmation(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    user = get_user_by_username(db, username)
+
+    if not user or not user.email:
+        raise HTTPException(status_code=404, detail="Email не указан")
+
+    confirm_token = jwt.encode(
+        {"sub": user.username, "email": user.email, "exp": datetime.utcnow() + timedelta(hours=1)},
+        CONFIRM_SECRET,
+        algorithm=ALGORITHM
+    )
+
+    confirm_url = f"http://localhost:8000/confirm-email/?token={confirm_token}"  # заменить на прод URL
+    send_email(user.email, confirm_url)
+
+    return {"message": f"Письмо отправлено на {user.email}"}
+
+@app.get("/confirm-email/")
+def confirm_email(token: str, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, CONFIRM_SECRET, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        user = get_user_by_username(db, username)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        user.email_confirmed = True
+        db.commit()
+        return {"message": "Email успешно подтвержден!"}
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Неверный или просроченный токен")
+
+@app.post("/update-email/")
+def update_email(
+    background_tasks: BackgroundTasks,
+    new_email: str = Form(...),
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.email = new_email
+    user.email_confirmed = False
+    db.commit()
+
+    # Отправляем новое письмо подтверждения
+    confirm_token = jwt.encode(
+        {"sub": user.username, "email": new_email, "exp": datetime.utcnow() + timedelta(hours=1)},
+        CONFIRM_SECRET,
+        algorithm=ALGORITHM
+    )
+    confirm_url = f"http://localhost:8000/confirm-email/?token={confirm_token}"
+    background_tasks.add_task(send_email, new_email, confirm_url)
+
+    return {"message": f"Email обновлён. Подтвердите по ссылке, отправленной на {new_email}."}
 
 @app.get("/currency-rates/")
 async def get_currency_rates(db: Session = Depends(get_db)):
@@ -214,27 +323,70 @@ async def get_currency_rates(db: Session = Depends(get_db)):
 
 @app.post("/register/", response_model=Token)
 def register_user(
-        username: str = Form(...),
-        password: str = Form(...),
-        db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    username: str = Form(...),
+    password: str = Form(...),
+    email: str = Form(...),
+    db: Session = Depends(get_db)
 ):
     existing_user = get_user_by_username(db, username)
     if existing_user:
         raise HTTPException(status_code=400, detail="Пользователь уже существует")
+
     hashed_password = get_password_hash(password)
-    new_user = User(username=username, password=hashed_password)
+    new_user = User(
+        username=username,
+        password=hashed_password,
+        email=email,
+        email_confirmed=False
+    )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    # Сразу создаем токен
+
+    # 🔐 Токен доступа
     access_token = create_access_token(data={"sub": new_user.username, "is_admin": new_user.is_admin})
+
+    # 📩 Запускаем отправку письма в фоне
+    confirm_token = jwt.encode(
+        {"sub": new_user.username, "email": new_user.email, "exp": datetime.utcnow() + timedelta(hours=1)},
+        CONFIRM_SECRET,
+        algorithm=ALGORITHM
+    )
+    confirm_url = f"http://localhost:8000/confirm-email/?token={confirm_token}"
+    background_tasks.add_task(send_email, new_user.email, confirm_url)
     return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/update-password/")
+def update_password(
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    if not verify_password(old_password, user.password):
+        raise HTTPException(status_code=403, detail="Старый пароль неверен")
+
+    user.password = get_password_hash(new_password)
+    db.commit()
+
+    return {"message": "Пароль успешно обновлён"}
+
 
 @app.post("/token/", response_model=Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = get_user_by_username(db, form_data.username)
     if not user or not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=400, detail="Неверное имя пользователя или пароль")
+    if not user.email_confirmed:
+        raise HTTPException(status_code=403, detail="Email не подтвержден")
     access_token = create_access_token(data={"sub": user.username, "is_admin": user.is_admin})
     print({"sub": user.username, "is_admin": user.is_admin})
     return {"access_token": access_token, "token_type": "bearer"}
