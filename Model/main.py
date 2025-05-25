@@ -239,6 +239,26 @@ def confirm_email(token: str, db: Session = Depends(get_db)):
     except JWTError:
         raise HTTPException(status_code=400, detail="Неверный или просроченный токен")
 
+@app.get("/email-status/")
+def check_email_status(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=403, detail="Недопустимый токен")
+
+        user = get_user_by_username(db, username)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        return {
+            "email": user.email,
+            "email_confirmed": user.email_confirmed
+        }
+    except JWTError:
+        raise HTTPException(status_code=403, detail="Ошибка аутентификации")
+
+
 @app.post("/update-email/")
 def update_email(
     background_tasks: BackgroundTasks,
