@@ -14,9 +14,9 @@ services:
       - app-network
 
   model:
-    build: ./Model
+    build: ./Backend
     volumes:
-      - ./Model:/app  # Автообновление кода модели
+      - ./Backend:/app  # Автообновление кода модели
     ports:
       - "8000:8000"
     depends_on:
@@ -24,7 +24,7 @@ services:
     networks:
       - app-network
     env_file:
-      - ./Model/.env
+      - ./Backend/.env
 
   frontend:
     build: ./Web
